@@ -16,6 +16,16 @@
 
 from numpy import *
 
+def normalize(x):
+    m = min(x)
+    if m >= 0:
+      return x
+    x -= m
+    m = max(x)
+    if m > 1:
+      x /= m
+    return x / sum(x)
+
 def pageRankGenerator(At = [array((), int64)], 
                       numLinks = array((), int64),  
                       ln = array((), int64),
@@ -23,7 +33,8 @@ def pageRankGenerator(At = [array((), int64)],
                       negLn = array((), int64),
                       alpha = 0.85, 
                       convergence = 0.0001, 
-                      checkSteps = 10
+                      checkSteps = 10,
+                      negativeRatio = 2.0
                       ):
     """
     Compute an approximate page rank vector of N pages to within
@@ -60,7 +71,6 @@ def pageRankGenerator(At = [array((), int64)],
     done = False
     pre_diff = 10000000
     negNumRatio = 1.0 * negNumLinks.take(negLn, axis = 0) / numLinks.take(negLn, axis = 0)
-    negativeRatio = 1.0
 
     while not done:
         checks_count += 1
@@ -81,7 +91,7 @@ def pageRankGenerator(At = [array((), int64)],
             # all elements are identical.
             oneAv = 0.0
             if M > 0:
-                neg_sum = dot(iOld.take(negLn, axis = 0), negNumRatio) * negativeRatio * 2
+                neg_sum = dot(iOld.take(negLn, axis = 0), negNumRatio) * (negativeRatio + 1)
                 oneAv = alpha * (sum(iOld.take(ln, axis = 0)) + neg_sum) / N
 
             # the elements of the H x I multiplication
@@ -99,9 +109,11 @@ def pageRankGenerator(At = [array((), int64)],
                 iNew[ii] = h + oneAv + oneIv
                 ii += 1
 
+            iNew = normalize(iNew)
+
         diff = sum(abs(iNew - iOld))
         print "diff: %20f" % diff
-        done = (diff < convergence or (pre_diff - diff) < convergence)
+        done = (diff < convergence)
         pre_diff = diff
 
         if done:
