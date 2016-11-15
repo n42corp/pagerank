@@ -19,6 +19,8 @@ from numpy import *
 def pageRankGenerator(At = [array((), int64)], 
                       numLinks = array((), int64),  
                       ln = array((), int64),
+                      negNumLinks = array((), int64),
+                      negLn = array((), int64),
                       alpha = 0.85, 
                       convergence = 0.0001, 
                       checkSteps = 10
@@ -54,8 +56,14 @@ def pageRankGenerator(At = [array((), int64)],
     iNew = ones((N,), float64) / N
     iOld = ones((N,), float64) / N
 
+    checks_count = 0
     done = False
+    pre_diff = 10000000
+    negNumRatio = 1.0 * negNumLinks.take(negLn, axis = 0) / numLinks.take(negLn, axis = 0)
+    negativeRatio = 1.0
+
     while not done:
+        checks_count += 1
 
         # normalize every now and then for numerical stability
         iNew /= sum(iNew)
@@ -73,7 +81,8 @@ def pageRankGenerator(At = [array((), int64)],
             # all elements are identical.
             oneAv = 0.0
             if M > 0:
-                oneAv = alpha * sum(iOld.take(ln, axis = 0)) / N
+                neg_sum = dot(iOld.take(negLn, axis = 0), negNumRatio) * negativeRatio * 2
+                oneAv = alpha * (sum(iOld.take(ln, axis = 0)) + neg_sum) / N
 
             # the elements of the H x I multiplication
             ii = 0 
@@ -81,15 +90,26 @@ def pageRankGenerator(At = [array((), int64)],
                 page = At[ii]
                 h = 0
                 if page.shape[0]:
+                    sign = (page >= 0) * 1 + (page < 0) * -negativeRatio
+                    page = abs(page)
                     h = alpha * dot(
-                            iOld.take(page, axis = 0),
+                            iOld.take(page, axis = 0) * sign,
                             1. / numLinks.take(page, axis = 0)
                             )
                 iNew[ii] = h + oneAv + oneIv
                 ii += 1
 
         diff = sum(abs(iNew - iOld))
-        done = (diff < convergence)
+        print "diff: %20f" % diff
+        done = (diff < convergence or (pre_diff - diff) < convergence)
+        pre_diff = diff
+
+        if done:
+          add = 1 - sum(iNew)
+          if add > 0:
+            iNew += add / N
+          print "sum: %f" % sum(iNew)
+          print "checks count: %d" % checks_count
 
         yield iNew
 
@@ -114,26 +134,36 @@ def transposeLinkMatrix(
     nPages = len(outGoingLinks)
     # incomingLinks[ii] will contain the indices jj of the pages
     # linking to page ii
-    incomingLinks = [[] for ii in range(nPages)]
+    incomingLinks = [[] for ii in xrange(nPages)]
     # the number of links in each page
     numLinks = zeros(nPages, int64)
     # the indices of the leaf nodes
     leafNodes = []
+    negNodes = []
+    negNumLinks = zeros(nPages, int64)
 
-    for ii in range(nPages):
+    for ii in xrange(nPages):
         if len(outGoingLinks[ii]) == 0:
             leafNodes.append(ii)
         else:
+            negCount = 0
             numLinks[ii] = len(outGoingLinks[ii])
             # transpose the link matrix
             for jj in outGoingLinks[ii]:
-                incomingLinks[jj].append(ii)
+                if jj < 0:
+                  negCount += 1
+                  incomingLinks[-jj].append(-ii)
+                else:
+                  incomingLinks[jj].append(ii)
+            if negCount > 0:
+              negNodes.append(ii)
+              negNumLinks[ii] = negCount
 
     incomingLinks = [array(ii) for ii in incomingLinks]
     numLinks = array(numLinks)
     leafNodes = array(leafNodes)
 
-    return incomingLinks, numLinks, leafNodes
+    return incomingLinks, numLinks, leafNodes, negNumLinks, negNodes
 
 
 def pageRank(
@@ -147,9 +177,9 @@ def pageRank(
 
     @see pageRankGenerator for parameter description
     """
-    incomingLinks, numLinks, leafNodes = transposeLinkMatrix(linkMatrix)
+    incomingLinks, numLinks, leafNodes, negNumLinks, negNodes = transposeLinkMatrix(linkMatrix)
 
-    for gr in pageRankGenerator(incomingLinks, numLinks, leafNodes,
+    for gr in pageRankGenerator(incomingLinks, numLinks, leafNodes, negNumLinks, negNodes,
                                 alpha = alpha, convergence = convergence,
                                 checkSteps = checkSteps):
         final = gr
